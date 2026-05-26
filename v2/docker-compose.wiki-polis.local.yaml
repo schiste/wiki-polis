@@ -4,7 +4,7 @@ services:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes: !override
       - "polis-schemas:/docker-entrypoint-initdb.d/"
-      - "${PARTICIAPI_DIR}/particiapi/schema.sql:/docker-entrypoint-initdb.d/particiapi_schema.sql"
+      - "${PARTICIAPI_DIR:?PARTICIAPI_DIR must be set in particiapp-docker/.env or dev.env}/particiapi/schema.sql:/docker-entrypoint-initdb.d/particiapi_schema.sql"
       - "${WIKI_POLIS_DIR:?set WIKI_POLIS_DIR to the wiki-polis checkout}/v2/tmp/postgresql:/var/lib/postgresql"
       - "${WIKI_POLIS_DIR:?set WIKI_POLIS_DIR to the wiki-polis checkout}/v2/tmp/postgres-backups:/backups"
 
