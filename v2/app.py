@@ -685,7 +685,11 @@ def admin_conversation_detail(conv_id):
     conv_roles = (AdminRole.query
                    .filter_by(conversation_id=conv_id)
                    .all())
-    participants      = Participant.query.order_by(Participant.mw_username).all()
+    can_manage_roles  = _is_global_admin()
+    participants      = (
+        Participant.query.order_by(Participant.mw_username).all()
+        if can_manage_roles else []
+    )
     invite_count      = ConversationInvite.query.filter_by(conversation_id=conv_id).count()
     participant_count = Participation.query.filter_by(conversation_id=conv_id).count()
     polis_stats       = _polis_server_client().get_polis_stats(conv.polis_id)
@@ -697,7 +701,8 @@ def admin_conversation_detail(conv_id):
                            participant_count=participant_count,
                            polis_stats=polis_stats,
                            polis_public_url=current_app.config.get('POLIS_PUBLIC_URL', ''),
-                           admin_roles=ADMIN_ROLES)
+                           admin_roles=ADMIN_ROLES,
+                           can_manage_roles=can_manage_roles)
 
 @admin_bp.post('/admin/conversations/new')
 @login_required
