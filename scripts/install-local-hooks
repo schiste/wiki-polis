@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib-v2-quality.sh"
+
+cd "$ROOT"
+
+run_uv pre-commit install \
+  --config "$ROOT/.pre-commit-config.yaml" \
+  --hook-type pre-commit \
+  --hook-type pre-push

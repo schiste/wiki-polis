@@ -1,0 +1,19 @@
+minimum_pre_commit_version: "3.7.0"
+repos:
+  - repo: local
+    hooks:
+      - id: wiki-polis-v2-check
+        name: wiki-polis v2 fast checks
+        entry: scripts/check-v2
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: wiki-polis-v2-pre-push
+        name: wiki-polis v2 pre-push gate
+        entry: scripts/pre-push-v2
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib-v2-quality.sh"
+
+cd "$ROOT"
+
+ALL_PY_FILES=()
+APP_PY_FILES=()
+while IFS= read -r -d '' path; do
+  case "$path" in
+    v2/.venv/*|v2/tmp/*) continue ;;
+  esac
+
+  ALL_PY_FILES+=("$path")
+  case "$path" in
+    v2/migrations/*|v2/tests/*) ;;
+    *) APP_PY_FILES+=("$path") ;;
+  esac
+done < <(git ls-files -z -- 'v2/*.py' 'v2/**/*.py')
+
+if [ "${#ALL_PY_FILES[@]}" -eq 0 ]; then
+  echo "No tracked v2 Python files found." >&2
+  exit 1
+fi
+
+if [ "${#APP_PY_FILES[@]}" -eq 0 ]; then
+  echo "No tracked v2 application Python files found." >&2
+  exit 1
+fi
+
+echo "==> bandit: high-severity Python security scan"
+run_uv bandit -q -lll "${ALL_PY_FILES[@]}"
+
+echo "==> vulture: likely dead-code detection"
+run_uv vulture "${APP_PY_FILES[@]}" v2/vulture_whitelist.py --min-confidence 90
+
+echo "==> pylint: duplicate-code detection"
+run_uv pylint \
+  --disable=all \
+  --enable=duplicate-code \
+  --min-similarity-lines=16 \
+  --ignore-comments=yes \
+  --ignore-docstrings=yes \
+  --ignore-imports=yes \
+  --persistent=no \
+  --reports=no \
+  --score=no \
+  "${APP_PY_FILES[@]}"

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib-v2-quality.sh"
+
+cd "$V2_ROOT"
+
+export POLIS_SERVER_URL="${POLIS_SERVER_URL:-http://127.0.0.1:8003}"
+export POLIS_ADMIN_EMAIL="${POLIS_ADMIN_EMAIL:-test@example.org}"
+export POLIS_ADMIN_PASSWORD="${POLIS_ADMIN_PASSWORD:-test}"
+
+echo "==> pytest: v2 suite"
+run_uv python -m pytest "$@"

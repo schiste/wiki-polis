@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib-v2-quality.sh"
+
+cd "$ROOT"
+
+PY_FILES=()
+while IFS= read -r -d '' path; do
+  case "$path" in
+    v2/.venv/*|v2/tmp/*) continue ;;
+  esac
+  PY_FILES+=("$path")
+done < <(git ls-files -z -- 'v2/*.py' 'v2/**/*.py')
+
+if [ "${#PY_FILES[@]}" -eq 0 ]; then
+  echo "No tracked v2 Python files found." >&2
+  exit 1
+fi
+
+echo "==> ruff: syntax and undefined-name checks"
+run_uv ruff check "${PY_FILES[@]}"
+
+echo "==> detect-secrets: tracked-file scan"
+git ls-files -z -- \
+  ':!.secrets.baseline' \
+  ':!uv.lock' \
+  ':!v2/uv.lock' \
+  | xargs -0 "$UV_BIN" run --project "$V2_ROOT" \
+  detect-secrets-hook \
+  --baseline "$ROOT/.secrets.baseline" \
+  --exclude-files '(\\.venv/|\\.pytest_cache/|^\\.env$|^v2/\\.env$|^uv\\.lock$|^v2/uv\\.lock$|^v2/tmp/|^\\.secrets\\.baseline$)'
