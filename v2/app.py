@@ -251,6 +251,95 @@ def _check_conversation_access(conversation, participant) -> None:
 
 # ── Particiapi proxy ──────────────────────────────────────────────────────────
 
+def _empty_particiapi_json_response():
+    resp = make_response('{}', 200)
+    resp.headers['Content-Type'] = 'application/json'
+    return resp
+
+
+def _require_particiapi_submission_open(conversation) -> None:
+    if (not conversation.active or conversation.paused
+            or not conversation.phase_submission):
+        abort(403)
+
+
+def _authorize_particiapi_proxy_path(pa_path: str):
+    """Apply wiki-polis access policy before forwarding auth-disabled Particiapi."""
+    path = pa_path.strip('/')
+
+    # Session creation is not conversation-scoped; later conversation calls are.
+    if path == 'api/session':
+        if request.method != 'POST':
+            abort(405)
+        return None
+
+    parts = path.split('/')
+    if len(parts) < 3 or parts[:2] != ['api', 'conversations']:
+        abort(404)
+
+    polis_id = parts[2]
+    if not _valid_polis_id(polis_id):
+        abort(404)
+
+    conversation = Conversation.query.filter_by(polis_id=polis_id).first_or_404()
+    participant = _current_participant()
+    if participant is None:
+        abort(403)
+
+    _check_conversation_access(conversation, participant)
+
+    participation = Participation.query.filter_by(
+        participant_id=participant.id,
+        conversation_id=conversation.id,
+    ).first()
+    if participation is None:
+        abort(403)
+
+    suffix = parts[3:]
+    read_methods = ('GET', 'HEAD')
+
+    if not suffix:
+        if request.method not in read_methods:
+            abort(405)
+        if conversation.phase_public_results:
+            return None
+        _require_particiapi_submission_open(conversation)
+        return None
+
+    if suffix == ['results']:
+        if request.method not in read_methods:
+            abort(405)
+        if not conversation.phase_public_results:
+            return _empty_particiapi_json_response()
+        return None
+
+    if suffix == ['statements']:
+        if request.method not in ('GET', 'POST'):
+            abort(405)
+        _require_particiapi_submission_open(conversation)
+        return None
+
+    if suffix == ['participant']:
+        if request.method not in read_methods:
+            abort(405)
+        _require_particiapi_submission_open(conversation)
+        return None
+
+    if suffix == ['participant', 'notifications']:
+        if request.method not in ('GET', 'HEAD', 'PUT'):
+            abort(405)
+        _require_particiapi_submission_open(conversation)
+        return None
+
+    if len(suffix) == 2 and suffix[0] == 'votes' and suffix[1].isdigit():
+        if request.method != 'PUT':
+            abort(405)
+        _require_particiapi_submission_open(conversation)
+        return None
+
+    abort(404)
+
+
 def _proxy_to_particiapi(pa_path: str):
     """
     Proxy a browser request to Particiapi and return the response.
@@ -279,6 +368,10 @@ def _proxy_to_particiapi(pa_path: str):
     # CRIT-1: Reject path traversal and non-API paths.
     if '..' in pa_path.split('/') or not pa_path.startswith('api/'):
         abort(404)
+
+    authz_response = _authorize_particiapi_proxy_path(pa_path)
+    if authz_response is not None:
+        return authz_response
 
     url = f"{current_app.config['PARTICIAPI_BASE']}/{pa_path}"
 

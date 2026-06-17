@@ -2,7 +2,15 @@
 import os
 from unittest.mock import patch
 
-from db import Conversation, db
+from db import Conversation, Participation, db
+
+
+class _UpstreamResponse:
+    def __init__(self, status_code=200, content=b'{}', headers=None, cookies=None):
+        self.status_code = status_code
+        self.content = content
+        self.headers = headers or {'Content-Type': 'application/json'}
+        self.cookies = cookies or {}
 
 
 def test_security_headers_on_every_response(client):
@@ -89,3 +97,122 @@ def test_proxy_delete_method_not_allowed(auth_client):
     """DELETE is not in the allowed proxy methods."""
     resp = auth_client.delete('/proxy/particiapi/api/conversations/')
     assert resp.status_code == 405
+
+
+def test_proxy_blocks_conversation_without_participation(auth_client, conversation):
+    """Logged-in users cannot proxy into conversations they have not joined."""
+    conversation.phase_submission = True
+    db.session.commit()
+
+    with patch('app.requests.request') as mock_request:
+        resp = auth_client.get(
+            f'/proxy/particiapi/api/conversations/{conversation.polis_id}/statements/'
+        )
+
+    assert resp.status_code == 403
+    mock_request.assert_not_called()
+
+
+def test_proxy_blocks_invite_only_conversation_without_invite(auth_client):
+    """Invite-only policy is enforced before forwarding to auth-disabled Particiapi."""
+    conv = Conversation(
+        slug='proxy-private',
+        polis_id='prx1234567',
+        title='Proxy Private',
+        active=True,
+        access_policy='invite_only',
+        phase_submission=True,
+    )
+    db.session.add(conv)
+    db.session.commit()
+
+    with patch('app.requests.request') as mock_request:
+        resp = auth_client.get(
+            f'/proxy/particiapi/api/conversations/{conv.polis_id}/statements/'
+        )
+
+    assert resp.status_code == 403
+    mock_request.assert_not_called()
+
+
+def test_proxy_blocks_submission_phase_when_joined(auth_client, conversation, participant):
+    """Joined users cannot submit/vote through the proxy when submission is off."""
+    db.session.add(Participation(
+        participant_id=participant.id,
+        conversation_id=conversation.id,
+        pseudonym='proxy-tester',
+    ))
+    conversation.phase_submission = False
+    db.session.commit()
+
+    with patch('app.requests.request') as mock_request:
+        resp = auth_client.get(
+            f'/proxy/particiapi/api/conversations/{conversation.polis_id}/statements/'
+        )
+
+    assert resp.status_code == 403
+    mock_request.assert_not_called()
+
+
+def test_proxy_forwards_allowed_participant_conversation_path(
+        auth_client, conversation, participant):
+    """A participant in an open submission phase can use the needed proxy paths."""
+    db.session.add(Participation(
+        participant_id=participant.id,
+        conversation_id=conversation.id,
+        pseudonym='proxy-member',
+    ))
+    conversation.phase_submission = True
+    db.session.commit()
+
+    with patch('app.requests.request',
+               return_value=_UpstreamResponse()) as mock_request:
+        resp = auth_client.get(
+            f'/proxy/particiapi/api/conversations/{conversation.polis_id}/statements/'
+        )
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {}
+    mock_request.assert_called_once()
+
+
+def test_proxy_rejects_unknown_conversation_api_path(
+        auth_client, conversation, participant):
+    """Only the Particiapi paths used by wiki-polis are proxyable."""
+    db.session.add(Participation(
+        participant_id=participant.id,
+        conversation_id=conversation.id,
+        pseudonym='proxy-known-path',
+    ))
+    conversation.phase_submission = True
+    db.session.commit()
+
+    with patch('app.requests.request') as mock_request:
+        resp = auth_client.get(
+            f'/proxy/particiapi/api/conversations/{conversation.polis_id}/unknown'
+        )
+
+    assert resp.status_code == 404
+    mock_request.assert_not_called()
+
+
+def test_proxy_results_disabled_returns_empty_without_forwarding(
+        auth_client, conversation, participant):
+    """Disabled results should not leak upstream data during client init."""
+    db.session.add(Participation(
+        participant_id=participant.id,
+        conversation_id=conversation.id,
+        pseudonym='proxy-results',
+    ))
+    conversation.phase_submission = True
+    conversation.phase_public_results = False
+    db.session.commit()
+
+    with patch('app.requests.request') as mock_request:
+        resp = auth_client.get(
+            f'/proxy/particiapi/api/conversations/{conversation.polis_id}/results/'
+        )
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {}
+    mock_request.assert_not_called()
